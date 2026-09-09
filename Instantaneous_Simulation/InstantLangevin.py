@@ -1,11 +1,11 @@
-# Jonas Hallstrom, 10/20/2023
+# Jonas Hallstrom, started 10/20/2023
 # Modified from files from Chris Qian and the HOOMD-Blue Examples Repository
 # Modified 05/28/2024 to record potential energy
 # Cleaned up 10/17/24
+# Commented and updated 09/09/26
 
 # Imports
 import itertools
-import math
 import gsd.hoomd
 import hoomd
 import numpy as np
@@ -30,11 +30,12 @@ edge_N = 5  # number of LJ particles on square nanoparticle edge
 edge_a = 50  # length of square nanoparticle
 (epsilon, sigma, rcut) = (0.13, 26.5, 100)   # LJ parameters
 LJ_mass = 1  # Mass of a single LJ particle
+square_mass = LJ_mass*(edge_N**2)  # Mass of composite square nanoparticle
 
 num_squares = 4000
 density = 8e-5  # Number density
 
-temp = 0.5  # simulation temperature and length
+temp = 0.5
 steps = 20e4
 dt = 0.1
 
@@ -64,7 +65,6 @@ np.random.shuffle(position_ids)  # so that later num_squares random positions ar
 
 
 # set up HOOMD initial frame
-square_mass = LJ_mass*(edge_N**2)
 frame = gsd.hoomd.Frame()
 frame.particles.types = ['Square', 'A']
 frame.particles.N = num_squares
@@ -75,7 +75,7 @@ frame.particles.mass = [square_mass] * num_squares
 frame.configuration.box = [L, L, 0, 0, 0, 0]
 I = np.zeros(shape=(3, 3))
 for r in LJ_position:
-    I += square_mass * (np.dot(r, r) * np.identity(3) - np.outer(r, r))
+    I += LJ_mass * (np.dot(r, r) * np.identity(3) - np.outer(r, r))
 frame.particles.moment_inertia = [0, 0, I[2, 2]] * num_squares
 with gsd.hoomd.open(name='initial.gsd', mode='w') as f:
     f.append(frame)

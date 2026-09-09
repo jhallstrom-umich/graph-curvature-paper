@@ -1,14 +1,14 @@
-# Jonas Hallstrom, 10/20/2023
+# Jonas Hallstrom, started 10/20/2023
 # Modified from files from Chris Qian and the HOOMD-Blue Examples Repository
 # Modified 01/10/2024 to write images and velocities
 # Modified 02/29/2024 to replace some noninteracting NPs with interacting NPs over time
 # Modified 07/06/2024 to make "noninteracting NPs" have much higher friction (gamma values)
 #  rather than not interact with other NPs
-# Cleanred up 10/16/24
+# Cleaned up 10/16/24
+# Commented and updated 09/09/26
 
 # Imports
 import itertools
-import math
 import gsd.hoomd
 import hoomd
 import numpy as np
@@ -30,10 +30,10 @@ edge_N = 5
 edge_a = 50
 (epsilon, sigma, rcut) = (0.13, 26.5, 100)
 LJ_mass = 1  # Mass of a single LJ particle
-square_mass = LJ_mass*(edge_N**2)
+square_mass = LJ_mass*(edge_N**2)  # Mass of composite square nanoparticle
 
 num_squares = 4000
-density = 8e-5
+density = 8e-5  # Number density
 
 num_waves = 7
 if num_waves>9:
@@ -124,7 +124,7 @@ for idx in range(num_waves+1):
 
     I = np.zeros(shape=(3, 3))
     for r in LJ_position:
-        I += square_mass * (np.dot(r, r) * np.identity(3) - np.outer(r, r))
+        I += LJ_mass * (np.dot(r, r) * np.identity(3) - np.outer(r, r))
     frame.particles.moment_inertia = [0, 0, I[2, 2]] * num_squares
 
     with gsd.hoomd.open(name='initial{}.gsd'.format(idx), mode='w') as f:
@@ -132,7 +132,8 @@ for idx in range(num_waves+1):
 
 
     """ Randomize the system """
-    # very short, NPs only slightly moving in this stage, except for the very first stage
+    # The purpose of this initial short simulation is just to allow the NPs to move around somewhat
+    #  with long-range interactions turned off
     rigid = hoomd.md.constrain.Rigid()
     rigid.body['Square'] = {
         "constituent_types": ['A'] * (edge_N**2),
@@ -155,18 +156,18 @@ for idx in range(num_waves+1):
 
     if idx==0:
         random_steps = 1e4
-        random_rcut = sigma 
     else:
-        random_steps = 10
-        random_rcut = rcut
+        # For all stages besides the first, we don't want to actually randomize but just instantiate the rigid bodies 
+        random_steps = 0
 
+    random_rcut = sigma  # "hard-body" lennard jones interaction, only short-ranged repulsion
     integrator = hoomd.md.Integrator(dt=dt, integrate_rotational_dof=True)
     integrator.rigid = rigid
     cell = hoomd.md.nlist.Cell(buffer=0.1, exclusions=['body'])
     lj = hoomd.md.pair.LJ(nlist=cell)
     # A and NI_A have the same interactions with each other
     lj.params[('A', 'A')] = dict(epsilon=epsilon, sigma=sigma)
-    lj.r_cut[('A', 'A')] = rcut
+    lj.r_cut[('A', 'A')] = random_rcut
     lj.params[('NI_A', ('NI_A', 'A'))] = dict(epsilon=epsilon, sigma=sigma)
     lj.r_cut[('NI_A', ('NI_A', 'A'))] = random_rcut
     # Both Square and NI_Square do not interact with anything
@@ -199,13 +200,20 @@ for idx in range(num_waves+1):
     sim.operations.computes.append(thermodynamic_properties)
 
     sim.run(random_steps)
-    hoomd.write.GSD.write(state=sim.state, filename='randomized{}.gsd'.format(idx), mode='wb')
+    if idx==0:
+        hoomd.write.GSD.write(state=sim.state, filename='randomized.gsd', mode='wb')
+    else:
+        hoomd.write.GSD.write(state=sim.state, filename='initial_rigid{}.gsd'.format(idx), mode='wb')
 
 
-    """ Cooling and annealing the system """
+
+    """ Fully simulate the next stage of the system """
     gpu = hoomd.device.GPU()
     sim = hoomd.Simulation(device=gpu, seed=1)
-    sim.create_state_from_gsd(filename='randomized{}.gsd'.format(idx))
+    if idx==0: 
+        sim.create_state_from_gsd(filename='randomized.gsd')
+    else:
+        sim.create_state_from_gsd(filename='initial_rigid{}.gsd'.format(idx))
 
     integrator = hoomd.md.Integrator(dt=dt, integrate_rotational_dof=True)
     integrator.rigid = rigid
@@ -244,11 +252,6 @@ for idx in range(num_waves+1):
         filter=rigid_centers_and_free)
 
     sim.operations.computes.append(thermodynamic_properties)
-    #sim.run(0)
-    #print(thermodynamic_properties.degrees_of_freedom)
-    #print(thermodynamic_properties.kinetic_energy)
-    #print(thermodynamic_properties.kinetic_temperature)
-    #print(thermodynamic_properties.potential_energy)
 
     # Add logger, which will put logged quantities in the gsd along with trajectory
     logger = hoomd.logging.Logger()
